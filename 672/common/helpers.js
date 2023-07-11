@@ -1,17 +1,14 @@
-// Write 48-bit value to array
-// The value is split into lower 32 bits and upper 32 bits (stored in dest[4] and dest[5] respectively)
 function i48Write(value, dest) {
-    dest[4] = value | 0;
-    // Divide the value by (2^32) or 4294967296 to extract the upper 32 bits
-    dest[5] = (value / 4294967296) | 0;
+    dest[4] = value | 0;                // Store the lower 32 bits of the value in dest[4]
+    dest[5] = (value / 4294967296) | 0; // Store the upper 32 bits of the value in dest[5]
 }
 
-// Read a 48-bit value from array
 // The lower 32 bits are retrieved from src[4] and the upper 32 bits from src[5]
 // The combined value is then reconstructed by multiplying the upper bits by 2^32 (4294967296) and adding the lower bits
 function i48Read(src) {
     return src[4] + src[5] * 4294967296;
 }
+
 // addrof primitive
 function addrof(x) {
   leaker_obj.a = x;
