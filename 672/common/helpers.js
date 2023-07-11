@@ -38,18 +38,17 @@ function write_mem(p, data) {
   oob_slave.set(data);
   printf("%d bytes written to %x", size, p);
 }
+
 function read_mem_as_string(p, sz) {
-  let bytes = read_mem(p, sz);
-  if (bytes.length === sz) {
-    printf("%d bytes read and converted to text", sz);
-    let plain = String.fromCharCode(...bytes);
-    bytes = null;
-    return plain;
-  }
-  printf("bytes read dont match requested size");
-  bytes = null;
-  return null;
+    let bytes = read_mem(p, sz); 
+    if (bytes.length == sz) {
+        printf("%d bytes read and converted to text", sz);
+        // Convert the bytes to a string and return it
+        return String.fromCharCode(...bytes);
+    } else printf("Bytes read don't match requested size"); 
+    return null; // Return null to indicate an error
 }
+
 function read_mem_s(p, sz) {
   read_mem_setup(p, sz);
   return `${oob_slave}`;
