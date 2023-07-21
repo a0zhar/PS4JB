@@ -218,7 +218,7 @@ int main() {
         return 179; // If successful, return 179
 
     // Spray 16 new sockets of type AF_INET6 (IPv6) and SOCK_DGRAM (UDP)
-    for (int i = 0; i < 16; i++, socket(AF_INET6, SOCK_DGRAM, 0));
+    for (int i = 0; i < 16; i++)socket(AF_INET6, SOCK_DGRAM, 0);
 
     // Declare variables for further use
     int tmp;
