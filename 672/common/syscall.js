@@ -1,4 +1,3 @@
-
 var aio_init_addr = libkernel_base + 126912;
 var fpathconf_addr = libkernel_base + 126944;
 var dmem_container_addr = libkernel_base + 126976;
